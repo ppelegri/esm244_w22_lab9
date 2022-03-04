@@ -1,0 +1,99 @@
+---
+title: "Lab 9"
+author: "Patrick Pelegri-O'Day"
+date: "3/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(broom)
+
+# time series packages
+library(tsibble)
+library(feasts)
+library(fable)
+```
+
+```{r}
+energy <- read_csv(here('data', 'energy.csv'))
+
+energy_ts <- energy %>% 
+  mutate(date = tsibble::yearmonth(month)) %>% 
+  as_tsibble(key = NULL, index = date)
+```
+
+### exploratory plotting
+
+```{r}
+ggplot(energy_ts, aes(x = date, y = res_total)) +
+  geom_line() +
+  labs(y = 'Residential energy consumption \n (Trillion BTU)')
+```
+
+### Season plots
+```{r}
+energy_ts %>% 
+  gg_season(y = res_total) + # x-axis will be whatever we specified as index when defined the ts in `as_tibble`
+  theme_minimal() + 
+  scale_color_viridis_c()+ # c makes it continuous bc our x-axis is basically continuous
+  labs(x = 'month', y = 'res energy consumption')
+```
+
+```{r}
+energy_ts %>% gg_subseries
+```
+
+```{r}
+# Find STL decomposition
+dcmp <- energy_ts %>%
+  model(STL(res_total ~ season()))
+
+# View the components
+# components(dcmp)
+
+# Visualize the decomposed components
+components(dcmp) %>% 
+  autoplot() +
+  theme_minimal()
+```
+
+### Autocorrelation function
+
+```{r}
+energy_ts %>% 
+  ACF(res_total) %>% 
+  autoplot()
+```
+
+### Forecasting
+
+```{r}
+energy_fit <- energy_ts %>% 
+  model(ets = ETS(res_total ~ season('M'))) # ETS is a model type, see lab key
+
+energy_forecast <- energy_fit %>% 
+  forecast(h = '10 years') # h = time span
+
+energy_forecast %>% autoplot
+
+energy_forecast %>% autoplot(energy_ts)
+```
+
+```{r}
+energy_predicted <- broom::augment(energy_fit) # energy fit is a model, augment plots predicted values from the model and then takes residuals based on predicted and observed values
+
+ggplot(energy_predicted) +
+  geom_line(aes(x = date, y = res_total)) +
+  geom_line(aes(x = date, y = .fitted), color = 'red', alpha = 0.7)
+  
+```
+
+```{r}
+ggplot(data = energy_predicted, aes(x = .resid)) +
+  geom_histogram()
+```
+

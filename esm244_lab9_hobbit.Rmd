@@ -1,0 +1,187 @@
+---
+title: 'Lab 9: Hobbit'
+author: "Patrick Pelegri-O'Day"
+date: "3/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(pdftools)
+library(ggwordcloud)
+```
+
+## Get The Hobbit
+
+```{r, cache = TRUE}
+hobbit_text <- pdf_text(here::here('data', 'the-hobbit.pdf'))
+```
+
+- Each row is a page of the PDF (i.e., this is a vector of strings, one for each page)
+- Only sees text that is "selectable"
+
+Example: Just want to get text from a single page (e.g. Page 34)? 
+
+```{r}
+hobbit_p34 <- hobbit_text[34]
+```
+
+From Jessica Couture and Casey O'Hara's [text mining workshop](https://github.com/oharac/text_workshop) for eco-data-science: “pdf_text() returns a vector of strings, one for each page of the pdf. So we can mess with it in tidyverse style, let’s turn it into a dataframe, and keep track of the pages. Then we can use stringr::str_split() to break the pages up into individual lines. Each line of the pdf is concluded with a backslash-n, so split on this. We will also add a line number in addition to the page number."
+
+Let's first get it into a data frame. Then we'll do some wrangling with the tidyverse, break it up by chapter, and do some analyses. 
+
+```{r}
+hobbit_lines <- data.frame(hobbit_text) %>% 
+  mutate(page = 1:n()) %>%
+  mutate(text_full = str_split(hobbit_text, pattern = '\\n')) %>% # split after every 2 line breaks 
+  unnest(text_full) %>% 
+  mutate(text_full = str_squish(text_full)) # get rid of extra whitespace
+
+# Why '\\n' instead of '\n'? Because some symbols (e.g. \, *) need to be called literally with a starting \ to escape the regular expression. For example, \\a for a string actually contains literally \a. So the string that represents the regular expression '\n' is actually '\\n'.
+
+# More information: https://cran.r-project.org/web/packages/stringr/vignettes/regular-expressions.html
+```
+
+## Do some tidying
+
+```{r}
+hobbit_chapts <- hobbit_lines %>% 
+  slice(-(1:137)) %>% # drop the first 137 lines so that we start at Chapter 1
+  mutate(chapter = ifelse(str_detect(text_full, 'Chapter'), text_full, NA)) %>% 
+  fill(chapter, .direction = 'down') %>%  # fill NAs in chapter column with string value downward until you get to next string value (e.g. Chapter 1 gets filled down to every line in Chapter 1)
+separate(col = chapter, into = c('ch', 'no'), sep = ' ') %>% 
+  mutate(chapter = as.numeric(as.roman(no)))
+```
+
+## Get some word counts by chapter
+
+```{r}
+hobbit_words <- hobbit_chapts %>% 
+  unnest_tokens(word, text_full, token = 'words') %>% 
+  select(-hobbit_text)
+
+hobbit_wordcount <- hobbit_words %>% 
+  count(chapter, word)
+```
+
+```{r}
+head(stop_words) # stop_words is a built in df with words that you probably don't want to use in your analysis
+
+hobbit_words_clean <- hobbit_words %>% 
+  anti_join(stop_words, by = 'word') # kind of like a -filter
+
+nonstop_counts <- hobbit_words_clean %>% 
+  count(chapter, word)
+```
+
+## Find top 5 words for each chapter
+
+```{r}
+top_5_words <- nonstop_counts %>% 
+  group_by(chapter) %>% 
+  arrange(-n) %>% 
+  slice(1:5) %>%
+  ungroup()
+
+# Make some graphs: 
+ggplot(data = top_5_words, aes(x = n, y = word)) +
+  geom_col(fill = "blue") +
+  facet_wrap(~chapter, scales = "free")
+```
+
+## Let's make a word cloud for Chapter 1
+
+```{r}
+ch1_top100 <- nonstop_counts %>% 
+  filter(chapter == 1) %>% 
+  arrange(-n) %>% 
+  slice(1:100)
+```
+
+```{r}
+ch1_cloud <- ggplot(data = ch1_top100, aes(label = word)) +
+  geom_text_wordcloud(aes(color = n, size = n), shape = "diamond") +
+  scale_size_area(max_size = 6) +
+  scale_color_gradientn(colors = c("darkgreen","blue","purple")) + # I believe that gradientn means that there are n colors in the gradient (I'm assuming 1 color for each frequency)
+  theme_minimal()
+
+ch1_cloud
+```
+
+## Sentiment analysis
+
+```{r}
+get_sentiments(lexicon = "afinn")
+
+# Let's look at the pretty positive words:
+afinn_pos <- get_sentiments("afinn") %>% 
+  filter(value %in% c(3,4,5))
+
+# Check them out:
+afinn_pos
+```
+
+For comparison, check out the bing lexicon: 
+
+```{r}
+get_sentiments(lexicon = "bing")
+```
+
+Now nrc:
+```{r}
+get_sentiments(lexicon = "nrc")
+```
+
+### Sentiment analysis with afinn: 
+
+First, bind words in `hobbit_nonstop_words` to `afinn` lexicon:
+```{r}
+hobbit_afinn <- hobbit_words_clean %>% 
+  inner_join(get_sentiments("afinn"), by = 'word') # Inner join only retains observations that match each other from both dfs. Obs that don't match will get dropped from both df1 and df2
+```
+
+```{r}
+afinn_counts <- hobbit_afinn %>% 
+  count(chapter, value)
+
+ggplot(afinn_counts, aes(x = value, y = n)) +
+  geom_col() +
+  facet_wrap(~ chapter)
+
+# Find the mean afinn score by chapter: 
+afinn_means <- hobbit_afinn %>% 
+  group_by(chapter) %>% 
+  summarize(mean_afinn = mean(value))
+
+ggplot(data = afinn_means, 
+       aes(x = fct_rev(factor(chapter)), # turn chapter to a factor then use factor reverse to get in reverse order
+           y = mean_afinn)) +
+           # y = fct_rev(as.factor(chapter)))) +
+  geom_col() +
+  coord_flip()
+```
+
+### Now with NRC lexicon
+
+Recall, this assigns words to sentiment bins. Let's bind our hobbit data to the NRC lexicon: 
+
+```{r}
+hobbit_nrc <- hobbit_words_clean %>% 
+  inner_join(get_sentiments("nrc"))
+```
+Let's find the count of words by chapter and sentiment bin: 
+
+```{r}
+hobbit_nrc_counts <- hobbit_nrc %>% 
+  count(chapter, sentiment)
+
+
+ggplot(data = hobbit_nrc_counts, aes(x = sentiment, y = n)) +
+  geom_col() +
+  facet_wrap(~chapter) +
+  coord_flip()
+```

@@ -1,0 +1,63 @@
+---
+title: 'Lab 9: Text Analysis'
+author: "Patrick Pelegri-O'Day"
+date: "3/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+```
+
+```{r}
+vec <- c('  A Unicorn    Fish', '  add   cornmeal    ', 'french FRIES', '  acorn squash ')
+
+str_detect(vec, pattern = 'corn')
+str_detect(vec, pattern = 'fish')
+str_extract(vec, pattern = '[a-z]')
+str_extract(vec, pattern = '[a-z]+')
+str_extract_all(vec, pattern = '[a-zA-Z]+')
+```
+
+```{r}
+walk_subset <- starwars %>% 
+  filter(str_detect(name, pattern = 'walk'))
+```
+
+```{r}
+str_replace(vec, pattern = 'corn', replacement = 'COOOLLL') # only replaces first instance of string for each element in list
+str_replace_all(vec, pattern = 'a', replacement = 'ZZZZZ') # replaces all instances of string for each element in list
+```
+
+```{r}
+sw_tornado <- starwars %>% 
+  mutate(name = str_replace(name, pattern = 'Sky', replacement = 'TORNADO'))
+```
+
+```{r}
+str_trim(vec) # gets rid of leading and trailing white space
+str_squish(vec) # gets rid of leading, trailing white space and extra white spaces in the middle
+```
+
+### Change case
+
+```{r}
+str_to_lower(vec) # turn all letters to lower case
+str_to_upper(vec)
+str_to_title(vec)
+
+tolower(vec) # same thing as str_to_lower
+```
+
+```{r}
+sw_combo <- starwars %>% 
+  mutate(across(name:starships, ~ str_to_lower(.x))) %>% # ~ is letting you know a function is coming, .x refers to whatever data was passed from before
+  # mutate(across(everything)) is another way to specify all thoser columns
+  # mutate(across(where(is.character))) is another way!
+  filter(str_detect(name, pattern = 'darth')) %>% 
+  mutate(name = str_replace(name, pattern = 'darth', replacement = 'Llama'))
+```
+
+
